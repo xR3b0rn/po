@@ -1,7 +1,6 @@
 
 #pragma once
 
-#include <any>
 #include <utility>
 #include <vector>
 #include <memory>
@@ -195,13 +194,15 @@ namespace po
             bool _parsed{false};
             bool _optional;
         };
-        class main_group
+        class root_group
             : public base_group
         {
         public:
-            main_group()
+            root_group()
                 : base_group("main_group", false)
-            {}
+            {
+                set_parsed(true);
+            }
             virtual bool
                 try_parse_option(int* argc, const char*** argv) override
             {
@@ -220,10 +221,8 @@ namespace po
             }
 
             parser()
-                : _main_group(std::make_unique<main_group>())
-            {
-                _last_parsed_group = _main_group.get();
-            }
+                : _main_group(std::make_unique<root_group>())
+            {}
             void
                 register_main_group_option(base_option* bo)
             {
@@ -259,19 +258,25 @@ namespace po
             std::optional<int>
                 execute_main()
             {
-                return _last_parsed_group->execute_main();
-            }
-            void
-                set_last_group(base_group* bg)
-            {
-                _last_parsed_group = bg;
+                std::optional<int> result;
+                for (auto* sp : _sub_programs)
+                {
+                    if (sp->parsed())
+                    {
+                        result = (*sp)();
+                        if (*result != 0)
+                        {
+                            break;
+                        }
+                    }
+                }
+                return result;
             }
 
         private:
             static parser _instance;
-            std::unique_ptr<main_group> _main_group;
+            std::unique_ptr<root_group> _main_group;
             std::vector<base_sub_program*> _sub_programs;
-            base_group* _last_parsed_group;
         };
         template <class T>
         class argument
@@ -520,7 +525,7 @@ namespace po
         struct option
         {
             std::string name;
-            bool optional;
+            bool optional{true};
         };
 
         group(const option& op)
@@ -540,7 +545,6 @@ namespace po
             std::string arg(**argv);
             if (arg == name())
             {
-                detail::parser::instance().set_last_group(this);
                 set_parsed(true);
                 (*argc)--;
                 (*argv)++;
@@ -579,14 +583,15 @@ namespace po
             : _program(program)
             , _member{std::forward_as_tuple(args...)}
         {
+            detail::parser::instance().register_sub_program(this);
             _base_group = detail::parser::instance().get_main_group();
-            _base_group->set_sub_program(this);
         }
         sub_program(detail::base_group& bg, std::function<int(const typename Args::type_t&...)>&& program, Args&... args)
             : _program(program)
             , _member{std::forward_as_tuple(args...)}
         {
-            bg.set_sub_program(this);
+            detail::parser::instance().register_sub_program(this);
+            _base_group = &bg;
         }
         virtual int
             operator()() override
