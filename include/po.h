@@ -56,7 +56,7 @@ namespace po
                         {
                             throw std::runtime_error("po error: option name \"" + std::string(name.begin() + 2, name.end()) + "\" is too short");
                         }
-                        _name = std::string(name.begin() + 1, name.end());
+                        _name = std::string(name.begin() + 2, name.end());
                     }
                 }
             }
@@ -443,12 +443,11 @@ namespace po
         struct option
         {
             std::string name;
-            bool optional{false};
             std::optional<T> def;
         };
 
         single_argument(const option& op)
-            : base1_t(op.name, op.optional ? 0 : 1, 1)
+            : base1_t(op.name, 1, 1)
             , _def(op.def)
         {
             if (op.def)
@@ -457,7 +456,7 @@ namespace po
             }
         }
         single_argument(detail::base_group& bg, const option& op)
-            : base1_t(bg, op.name, op.optional ? 0 : 1, 1)
+            : base1_t(bg, op.name, 1, 1)
             , _def(op.def)
         {
             if (op.def)
@@ -491,6 +490,41 @@ namespace po
     private:
         bool _def;
         T _argument;
+    };
+    template <class T>
+    class optional_argument
+        : public detail::argument<T>
+    {
+    public:
+        using base1_t = detail::argument<T>;
+        using type_t = std::optional<T>;
+
+        struct option
+        {
+            std::string name;
+            bool optional{false};
+        };
+
+        optional_argument(const option& op)
+            : base1_t(op.name, 0, 1)
+        {}
+        optional_argument(detail::base_group& bg, const option& op)
+            : base1_t(bg, op.name, 0, 1)
+        {}
+        virtual bool
+            try_parse_option(int* argc, const char*** argv) override
+        {
+            auto ret = base1_t::try_parse_option_argument(argc, argv);
+            _argument = ret;
+            return bool(ret);
+        }
+        operator std::optional<T>() const
+        {
+            return _argument;
+        }
+
+    private:
+        std::optional<T> _argument;
     };
     template <class T>
     class multi_argument
