@@ -139,6 +139,7 @@ namespace po
                     throw std::runtime_error("po error: parsing program option failed");
                 }
                 bool parsed = true;
+                bool group_parsed = false;
                 while (parsed)
                 {
                     parsed = false;
@@ -146,6 +147,16 @@ namespace po
                     {
                         if (op->try_parse_option(argc, argv))
                         {
+                            if (dynamic_cast<base_group*>(op))
+                            {
+                                if (group_parsed)
+                                {
+                                    throw std::runtime_error(
+                                        "po error: two groups (first: \"" + name_or_short() + "\" second: \"" + op->name_or_short() +  "\")"
+                                        "in the same stage are not possible");
+                                }
+                                group_parsed = true;
+                            }
                             if (*argc != 0)
                             {
                                 parsed = true;
@@ -250,6 +261,7 @@ namespace po
             void
                 notify() const
             {
+                _main_group->notify();
                 for (auto* op : _main_group->options())
                 {
                     op->notify();
