@@ -14,19 +14,6 @@ PO_INIT_MAIN_FILE_WITH_SUB_PROGRAM_SUPPORT()
 // The library introduces the concept of sub programs
 // It possible (but not mandatory) to create groups and assign them to a sub program which is invoked if the group gets parsed
 // Those relationships result in a tree as shown here in example:
-// ./program group1.1 --arg1=1 --arg2=2 group2.1 --arg3=3 group3.1 --arg4=4
-// Good if the tree looks like:
-// ./program
-//   +- group1
-//      +- {arg1} // optional int
-//      +- arg2   // int
-//      +- group2
-//         +- arg3  // int
-//         +- group3
-//            +- arg4=5  // int
-//            +- flag1   // bool
-//            +- marg1.1 // filepath
-//            +- marg1.2 // filepath
 
 // Here we build the tree
 static po::multi_pattern_flag<std::string> pflag1({ .name = "pflag1", .pattern = "pflag1-*" });
@@ -82,4 +69,18 @@ static po::sub_program sp_default(main_sub);
 // main_sub_group1 only gets invoekd if group1 gets parsed, the arguments passed to the function will be passed to main_sub_group1
 static po::sub_program sp1(group3, main_sub_group3, parg1, arg1, arg2, arg3, arg4, flag1, marg1);
 
+```
+### Example program invokation
+```
+$ ./program --pflag1-can0 --parg1-asdf=1.1 --parg1-qwer=2.2 group1 --arg2=2 group2 --arg3=3 group3 --flag1 --marg1=file1.txt --marg1=file2.txt
+=============== main_sub ===============
+=============== main_sub_group3 ===============
+parg1-asdf=1.1
+parg1-qwer=2.2
+arg2=2
+arg3=3
+arg4=5
+flag1=true
+marg1.1="file1.txt"
+marg1.2="file2.txt"
 ```
