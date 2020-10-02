@@ -13,7 +13,7 @@ PO_INIT_MAIN_FILE_WITH_SUB_PROGRAM_SUPPORT()
 
 // The library introduces the concept of sub programs
 // It possible (but not mandatory) to create groups and assign them to a sub program which is invoked if the group gets parsed
-// Those relationships result in a tree as shown here in example:
+// Those relationships result in a tree as shown here in this example:
 
 // Here we build the tree
 static po::multi_pattern_flag<std::string> pflag1({ .name = "pflag1", .pattern = "pflag1-*" });
