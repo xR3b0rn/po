@@ -107,7 +107,7 @@ namespace po
                 }
             }
             virtual ParseStatus
-                try_parse_option(int* argc, const char*** argv) = 0
+                try_parse_option(int* argc, const char*** argv)
             {
                 ParseStatus result = ParseStatus::NoMatch;
                 if (_pattern == "")
