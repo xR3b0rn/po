@@ -15,7 +15,10 @@ endif()
 add_library(po INTERFACE)
 add_library(po::po ALIAS po)
 
-target_include_directories(po ${po_warning_guard} INTERFACE $<BUILD_INTERFACE:include>)
+target_include_directories(po
+        ${po_warning_guard}
+        INTERFACE
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>)
 
 target_compile_features(po INTERFACE cxx_std_17)
 

@@ -17,7 +17,9 @@ function(add_test)
   cmake_parse_arguments(TEST "" "NAME" "ARGUMENTS" ${ARGN})
 
   add_executable(${TEST_NAME} source/${TEST_NAME}.cpp)
-  target_include_directories(${TEST_NAME} PRIVATE $<BUILD_INTERFACE:include>)
+  target_include_directories(${TEST_NAME}
+          PRIVATE
+          $<BUILD_INTERFACE:${PROJECT_SOURC_DIR}/include>)
   target_link_libraries(${TEST_NAME} PRIVATE po::po)
   target_compile_features(${TEST_NAME} PRIVATE cxx_std_17)
 
