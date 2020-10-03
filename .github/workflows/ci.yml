@@ -24,6 +24,14 @@ jobs:
       - uses: friendlyanon/fetch-core-count@v1
         id: cores
 
+      - name: Install
+        if: matrix.install == 'YES'
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE:STRING=Debug
+          cmake --build build --config Debug
+          sudo cmake --install build --config Debug
+          rm -rf build
+
       - name: Configure
         run: cmake -S test -B build
           -DCMAKE_BUILD_TYPE:STRING=Debug
@@ -32,10 +40,6 @@ jobs:
       - name: Build
         run: cmake --build build --config Debug
           -j ${{ steps.cores.outputs.plus_one }}
-
-      - name: Install
-        if: matrix.install == 'YES'
-        run: sudo cmake --install build --config Debug
 
       - name: Test
         working-directory: build
