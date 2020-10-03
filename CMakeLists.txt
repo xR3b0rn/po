@@ -20,7 +20,7 @@ target_include_directories(po
         INTERFACE
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>)
 
-target_compile_features(po INTERFACE cxx_std_17)
+target_compile_features(po INTERFACE cxx_std_20)
 
 # ---- Install ----
 

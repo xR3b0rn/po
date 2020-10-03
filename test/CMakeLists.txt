@@ -21,7 +21,7 @@ function(add_test)
           PRIVATE
           $<BUILD_INTERFACE:${PROJECT_SOURC_DIR}/include>)
   target_link_libraries(${TEST_NAME} PRIVATE po::po)
-  target_compile_features(${TEST_NAME} PRIVATE cxx_std_17)
+  target_compile_features(${TEST_NAME} PRIVATE cxx_std_20)
 
   # Call original add_test
   _add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME} ${TEST_ARGUMENTS})
