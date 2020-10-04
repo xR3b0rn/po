@@ -1,4 +1,6 @@
 # po
+## Aim
+The aim of the library is to make it possible to build some more complex command line tools like for example [nmcli](https://developer.gnome.org/NetworkManager/stable/nmcli.html) while keeping everything as simple as possible.
 ## Example
 ```C++
 #include <iostream>
