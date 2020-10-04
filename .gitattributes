@@ -1,0 +1,6 @@
+* text=auto
+
+CMakeLists.txt eol=lf
+*.h eol=lf
+*.cpp eol=lf
+*.cmake eol=lf

@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <cstring>
 #include <utility>
 #include <vector>
 #include <memory>
@@ -107,7 +108,7 @@ namespace po
                 }
             }
             virtual ParseStatus
-                try_parse_option(int* argc, const char*** argv) = 0
+                try_parse_option(int* argc, const char*** argv)
             {
                 ParseStatus result = ParseStatus::NoMatch;
                 if (_pattern == "")
@@ -995,7 +996,7 @@ namespace po
             {
                 _arguments.push_back(*ret);
             }
-            return ret ? detail::base_option::ParseStatus::Match : detail::base_option::ParseStatus::NoMatch;
+            return ret ? ParseStatus::Match : ParseStatus::NoMatch;
         }
         operator std::vector<T>() const
         {
@@ -1041,7 +1042,7 @@ namespace po
                 auto key = detail::helper::lexical_cast<KeyT>(pa);
                 _arguments.insert(std::make_pair(key, *ret));
             }
-            return ret ? detail::base_option::ParseStatus::Match : detail::base_option::ParseStatus::NoMatch;
+            return ret ? ParseStatus::Match : ParseStatus::NoMatch;
         }
         operator type_t() const
         {
