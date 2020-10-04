@@ -1,3 +1,4 @@
+
 #include <iostream>
 #include <filesystem>
 
@@ -12,19 +13,19 @@ PO_INIT_MAIN_FILE_WITH_SUB_PROGRAM_SUPPORT()
 // Those relationships result in a tree as shown here in this example:
 
 // Here we build the tree
-static po::multi_pattern_flag<std::string> pflag1({ .name = "pflag1", .pattern = "pflag1-*" });
-static po::multi_pattern_argument<std::string, double> parg1({ .name = "parg1", .pattern = "parg1-*" });
-static po::group group1({ .name = "group1" });
-static po::group group2(group1, { .name = "group2" });
-static po::group group3(group2, { .name = "group3" });
-static po::optional_argument<int> arg1(group1, { .name = "arg1" });
-static po::single_argument<int> arg2(group1, { .name = "arg2" });
-static po::single_argument<int> arg3(group2, { .name = "arg3" });
-static po::single_argument<int> arg4(group3, { .name = "arg4", .def = 5 });
-static po::flag flag1(group3, { .name = "flag1", .short_name = "f" });
-static po::multi_argument<std::filesystem::path> marg1(group3, { .name = "marg1", .min = 1, .max = 10 });
+static po::multi_pattern_flag<std::string> pflag1(po::LongName("pflag1"), po::Pattern("pflag1-*"));
+static po::multi_pattern_argument<std::string, double> parg1(po::LongName("parg1"), po::Pattern("parg1-*"));
+static po::group group1(po::LongName("group1"));
+static po::group group2(po::ParentGroup(group1), po::LongName("group2"));
+static po::group group3(po::ParentGroup(group2), po::LongName("group3"));
+static po::optional_argument<int> arg1(po::ParentGroup(group1), po::LongName("arg1"));
+static po::argument<int> arg2(po::ParentGroup(group1), po::LongName("arg2"));
+static po::argument<int> arg3(po::ParentGroup(group2), po::LongName("arg3"));
+static po::argument<int> arg4(po::ParentGroup(group3), po::LongName("arg4"), po::Def<int>(5));
+static po::flag flag1(po::ParentGroup(group3), po::LongName("flag1"), po::ShortName('f'));
+static po::multi_argument<std::filesystem::path> marg1(po::ParentGroup(group3), po::LongName("marg1"), po::Min(1), po::Max(10));
 static po::help main_help({});
-static po::help goup1_help(group1, { .header = "group1 help" });
+static po::help goup1_help(po::ParentGroup(group1), po::Header("group1 help"));
 
 // Two main functions
 int main_sub()

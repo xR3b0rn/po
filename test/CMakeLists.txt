@@ -33,3 +33,7 @@ add_test(NAME example ARGUMENTS
         group1 --arg2=2
         group2 --arg3=3
         group3 --flag1 --marg1=file1.txt --marg1=file2.txt)
+add_test(NAME candump ARGUMENTS
+        -c -c -ta "can0,123:7FF,400:700,#000000FF" can2,400~7F0 can3 can8)
+add_test(NAME nmcli ARGUMENTS
+        connection up uuid 1234-5678 ifname wlan0)
