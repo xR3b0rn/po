@@ -1,86 +1,179 @@
 # po
 ## Aim
 The aim of the library is to make it possible to build some more complex command line tools like for example [nmcli](https://developer.gnome.org/NetworkManager/stable/nmcli.html) while keeping everything as simple as possible.
-## Example
+## Example candump
 ```C++
-#include <iostream>
-#include <filesystem>
 
 #include <po.h>
+#include <iostream>
 
-// Initialize the library
-// This macro creates the single tone instance of the parser which holds references to the created options and provides a main, if you want write your own main the macro PO_INIT_MAIN_FILE instead can be used, 
-PO_INIT_MAIN_FILE_WITH_SUB_PROGRAM_SUPPORT()
+static po::detail::parser parser;
+static po::argument<char> timestamp{po::ParentGroup(parser), po::ArgName("timestamp"), po::ShortName('t'), po::Def<char>('a'), po::Desc("(timestamp: (a)bsolute/(d)elta/(z)ero/(A)bsolute w date)")};
+static po::flag hardware_timestamp{po::ParentGroup(parser), po::ShortName('H'), po::Desc("(read hardware timestamps instead of system timestamps)")};
+static po::multi_flag increment_color_level{po::ParentGroup(parser), po::ShortName('c'), po::Min(0), po::Desc("(increment color mode level)")};
+static po::flag binary_output{po::ParentGroup(parser), po::ShortName('i'), po::Desc("(binary output - may exceed 80 chars/line)")};
+static po::flag ascii_output{po::ParentGroup(parser), po::ShortName('a'), po::Desc("(enable additional ASCII output)")};
+static po::flag swap_byte_order{po::ParentGroup(parser), po::ShortName('S'), po::Desc("(swap byte order in printed CAN data[] - marked with '`' )")};
+static po::argument<char> silent_mode{po::ParentGroup(parser), po::ShortName('s'), po::Def<char>('0'), po::Desc("(silent mode - 0: off (default) 1: animation 2: silent)")};
+static po::optional_argument<std::string> bridge{po::ParentGroup(parser), po::ShortName('b'), po::Desc("(bridge mode - send received frames to <can>)")};
+static po::optional_argument<std::string> bridge_without_loop_back{po::ParentGroup(parser), po::ShortName('B'), po::Desc("(bridge mode - like '-b' with disabled loopback)")};
+static po::argument<std::size_t> bridge_delay{po::ParentGroup(parser), po::ShortName('u'), po::Def<std::size_t>(10), po::Desc("(delay bridge forwarding by <usecs> microseconds)")};
+static po::flag log_to_file{po::ParentGroup(parser), po::ShortName('l'), po::Desc("(log CAN-frames into file. Sets '-s 2' by default)")};
+static po::flag log_to_stdout{po::ParentGroup(parser), po::ShortName('L'), po::Desc("(use log file format on stdout)")};
+static po::optional_argument<std::size_t> terminate_after{po::ParentGroup(parser), po::ShortName('n'), po::Desc("(terminate after receiption of <count> CAN frames)")};
+static po::optional_argument<std::size_t> socket_receive_buffer_size{po::ParentGroup(parser), po::ShortName('r'), po::Desc("(set socket receive buffer to <size>)")};
+static po::flag do_not_exit_on_device_down{po::ParentGroup(parser), po::ShortName('D'), po::Desc("(Don't exit if a \"detected\" can device goes down.)")};
+static po::flag monitor_dropped_frames{po::ParentGroup(parser), po::ShortName('d'), po::Desc("(monitor dropped CAN frames)")};
+static po::flag dump_can_errors_human_readable{po::ParentGroup(parser), po::ShortName('e'), po::Desc("(dump CAN error frames in human-readable format)")};
+static po::flag print_extra_msg_info{po::ParentGroup(parser), po::ShortName('x'), po::Desc("(print extra message infos, rx/tx brs esi)")};
+static po::optional_argument<std::size_t> terminate_after_msescs{po::ParentGroup(parser), po::ShortName('T'), po::Desc("(terminate after <msecs> without any reception)")};
+static po::multi_positional_argument can_interfaces{
+      po::ParentGroup(parser)
+    , po::Desc(
+        "Up to 16 CAN interfaces with optional filter sets can be specified "
+        "on the commandline in the form: <ifname>[,<filter>]*"
+        "\n\n"
+        "Filters:\n"
+        "Comma separated filters can be specified for each given CAN interface.\n\n"
+        "<can_id>:<can_mask>\n\n"
+        "(matches when <received_can_id> & mask == can_id & mask)\n\n"
+        "<can_id>~<can_mask>\n\n"
+        "(matches when <received_can_id> & mask != can_id & mask)\n\n"
+        "#<error_mask>\n\n"
+        "(set error frame filter, see include/linux/can/error.h)\n\n"
+        "[j|J]\n\n"
+        "(join the given CAN filters - logical AND semantic)\n\n"
+        "CAN IDs, masks and data content are given and expected in hexadecimal values.  When can_id"
+        "and  can_mask  are  both  8  digits, they are assumed to be 29 bit EFF.  Without any given"
+        "filter all data frames are received ('0:0' default filter).\n\n"
+        "Use interface name 'any' to receive from all CAN interfaces.")
+    , po::ArgName("ifname[,<filter>*]")};
+static po::help help{po::ParentGroup(parser)};
 
-// The library introduces the concept of sub programs
-// It possible (but not mandatory) to create groups and assign them to a sub program which is invoked if the group gets parsed
-// Those relationships result in a tree as shown here in this example:
-
-// Here we build the tree
-static po::multi_pattern_flag<std::string> pflag1(po::LongName("pflag1"), po::Pattern("pflag1-*"));
-static po::multi_pattern_argument<std::string, double> parg1(po::LongName("parg1"), po::Pattern("parg1-*"));
-static po::group group1(po::LongName("group1"));
-static po::group group2(po::ParentGroup(group1), po::LongName("group2"));
-static po::group group3(po::ParentGroup(group2), po::LongName("group3"));
-static po::optional_argument<int> arg1(po::ParentGroup(group1), po::LongName("arg1"));
-static po::argument<int> arg2(po::ParentGroup(group1), po::LongName("arg2"));
-static po::argument<int> arg3(po::ParentGroup(group2), po::LongName("arg3"));
-static po::argument<int> arg4(po::ParentGroup(group3), po::LongName("arg4"), po::Def<int>(5));
-static po::flag flag1(po::ParentGroup(group3), po::LongName("flag1"), po::ShortName('f'));
-static po::multi_argument<std::filesystem::path> marg1(po::ParentGroup(group3), po::LongName("marg1"), po::Min(1), po::Max(10));
-static po::help main_help({});
-static po::help goup1_help(po::ParentGroup(group1), po::Header("group1 help"));
-
-// Two main functions
-int main_sub()
+int main(int argc, const char** argv)
 {
-    std::cout << "=============== main_sub ===============" << std::endl;
+    try
+    {
+        parser.parse_command_line(argc, argv);
+    }
+    catch (const po::help_ex& h)
+    {
+        std::cout << h.what();
+        return 0;
+    }
+    parser.notify();
     return 0;
 }
-int main_sub_group3(
-      const std::map<std::string, double>& parg1
-    , const std::optional<int>& arg1
-    , const int& arg2
-    , const int& arg3
-    , const int& arg4
-    , const bool& flag1
-    , const std::vector<std::filesystem::path>& marg1)
-{
-    std::cout << "=============== main_sub_group3 ===============" << std::endl;
-    for (const auto&[key, value] : parg1)
-    {
-        std::cout << "parg1-" << key << "=" << value << std::endl;
-    }
-    if (arg1) std::cout << "arg1=" << *arg1 << std::endl;
-    std::cout << "arg2=" << arg2 << std::endl;
-    std::cout << "arg3=" << arg3 << std::endl;
-    std::cout << "arg4=" << arg4 << std::endl;
-    std::cout << std::boolalpha << "flag1=" << flag1 << std::endl;
-    std::size_t i = 1;
-    for (const auto& p : marg1)
-    {
-        std::cout << "marg1." << i << "=" << p << std::endl;
-        i++;
-    }
-    return 0;
-}
-// Register the main functions
-// main_sub gets invoked if the rout_group gets parsed (so main_sub behaves like the classic main function)
-static po::sub_program sp_default(main_sub);
-// main_sub_group1 only gets invoekd if group1 gets parsed, the arguments passed to the function will be passed to main_sub_group1
-static po::sub_program sp1(group3, main_sub_group3, parg1, arg1, arg2, arg3, arg4, flag1, marg1);
+
 ```
 ### Example program invocation
 ```
-$ ./program --pflag1-can0 --parg1-asdf=1.1 --parg1-qwer=2.2 group1 --arg2=2 group2 --arg3=3 group3 --flag1 --marg1=file1.txt --marg1=file2.txt
-=============== main_sub ===============
-=============== main_sub_group3 ===============
-parg1-asdf=1.1
-parg1-qwer=2.2
-arg2=2
-arg3=3
-arg4=5
-flag1=true
-marg1.1="file1.txt"
-marg1.2="file2.txt"
+$ ./candump --help
+Synopsis:
+  candump.exe [Options...] <ifname[,<filter>*]>...
+
+Options:
+  -t <timestamp=a>          (timestamp:
+                            (a)bsolute/(d)elta/(z)ero/(A)bsolute
+                            w date)
+
+
+  -H                        (read hardware timestamps
+                            instead of system timestamps)
+
+  -i                        (binary output - may exceed 80
+                            chars/line)
+
+  -a                        (enable additional ASCII output)
+
+
+  -S                        (swap byte order in printed CAN
+                            data[] - marked with '`' )
+
+  -s <arg=0>                (silent mode - 0: off (default)
+                            1: animation 2: silent)
+
+
+  [-b <arg>]                (bridge mode - send received
+                            frames to <can>)
+
+  [-B <arg>]                (bridge mode - like '-b' with
+                            disabled loopback)
+
+  -u <arg=10>               (delay bridge forwarding by
+                            <usecs> microseconds)
+
+
+  -l                        (log CAN-frames into file. Sets
+                            '-s 2' by default)
+
+  -L                        (use log file format on stdout)
+
+  [-n <arg>]                (terminate after receiption of
+                            <count> CAN frames)
+
+  [-r <arg>]                (set socket receive buffer to
+                            <size>)
+
+  -D                        (Don't exit if a "detected" can
+                            device goes down.)
+
+  -d                        (monitor dropped CAN frames)
+
+  -e                        (dump CAN error frames in
+                            human-readable format)
+
+  -x                        (print extra message infos,
+                            rx/tx brs esi)
+
+  [-T <arg>]                (terminate after <msecs> without
+                            any reception)
+
+  -h | --help
+
+  <ifname[,<filter>*]>...
+                            Up to 16 CAN interfaces with
+                            optional filter sets can be
+                            specified on the commandline in
+                            the form: <ifname>[,<filter>]*
+
+                            Filters:
+                            Comma separated filters can be
+                            specified for each given CAN
+                            interface.
+
+                            <can_id>:<can_mask>
+
+                            (matches when <received_can_id>
+                            & mask == can_id & mask)
+
+                            <can_id>~<can_mask>
+
+                            (matches when <received_can_id>
+                            & mask != can_id & mask)
+
+                            #<error_mask>
+
+                            (set error frame filter, see
+                            include/linux/can/error.h)
+
+                            [j|J]
+
+                            (join the given CAN filters -
+                            logical AND semantic)
+
+                            CAN IDs, masks and data content
+                            are given and expected in
+                            hexadecimal values. When
+                            can_idand can_mask are both 8
+                            digits, they are assumed to be
+                            29 bit EFF. Without any
+                            givenfilter all data frames are
+                            received ('0:0' default filter).
+
+
+                            Use interface name 'any' to
+                            receive from all CAN interfaces.
 ```
+## More Examples
+More examples can be found in the test folder.

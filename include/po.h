@@ -994,6 +994,13 @@ namespace po
     using After = detail::helper::named_type<detail::base_group::parent_t, detail::TagAfter>;
     using ArgName = detail::helper::named_type<std::string_view, detail::TagArgName>;
 
+    class help_ex
+        : public std::runtime_error
+    {
+    public:
+        using std::runtime_error::runtime_error;
+    };
+
     class flag
         : public detail::base_option
     {
@@ -1199,7 +1206,7 @@ namespace po
             {
                 std::stringstream ss;
                 parent()->get().print_help(ss, *argc + (narg - *argc + 1), *argv - (narg - *argc + 1));
-                throw std::runtime_error(ss.str());
+                throw help_ex(ss.str());
             }
             return ret == ParseStatus::Match ? ParseStatus::HelpParsed : ParseStatus::NoMatch;
         }

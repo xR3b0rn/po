@@ -43,12 +43,19 @@ static po::multi_positional_argument can_interfaces{
         "filter all data frames are received ('0:0' default filter).\n\n"
         "Use interface name 'any' to receive from all CAN interfaces.")
     , po::ArgName("ifname[,<filter>*]")};
+static po::help help{po::ParentGroup(parser)};
 
 int main(int argc, const char** argv)
 {
-    parser.get_main_group()->print_help(std::cout, argc, argv);
-    int result = 0;
-    parser.parse_command_line(argc, argv);
+    try
+    {
+        parser.parse_command_line(argc, argv);
+    }
+    catch (const po::help_ex& h)
+    {
+        std::cout << h.what();
+        return 0;
+    }
     parser.notify();
-    return result;
+    return 0;
 }
