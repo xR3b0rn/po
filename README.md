@@ -70,7 +70,7 @@ static po::sub_program sp_default(main_sub);
 // main_sub_group1 only gets invoekd if group1 gets parsed, the arguments passed to the function will be passed to main_sub_group1
 static po::sub_program sp1(group3, main_sub_group3, parg1, arg1, arg2, arg3, arg4, flag1, marg1);
 ```
-### Example program invokation
+### Example program invocation
 ```
 $ ./program --pflag1-can0 --parg1-asdf=1.1 --parg1-qwer=2.2 group1 --arg2=2 group2 --arg3=3 group3 --flag1 --marg1=file1.txt --marg1=file2.txt
 =============== main_sub ===============
