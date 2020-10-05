@@ -12,6 +12,10 @@
 #include <functional>
 #include <type_traits>
 #include <map>
+#include <set>
+#include <ostream>
+#include <iomanip>
+#include <filesystem>
 
 namespace po
 {
@@ -69,13 +73,6 @@ namespace po
             template <class T1, class T2>
             inline constexpr bool has_type_v = has_type<T1, T2>::value;
 
-            template<const char* ErrorMsg, class ParamT, class... Types>
-            typename ParamT::type_t pick_option(Types&&... args)
-            {
-                auto t = std::make_tuple(std::forward<Types>(args)...);
-                //static_assert(has_type<ParamT, decltype(t)>::value, ErrorMsg);
-                return std::get<ParamT>(t);
-            }
             template<class ParamT, class... Types>
             typename ParamT::type_t pick_option_with_default(const typename ParamT::type_t& def, Types&&... args)
             {
@@ -85,6 +82,37 @@ namespace po
                     return std::get<ParamT>(t);
                 }
                 return def;
+            }
+            
+            void print_1_column(std::ostream& os, std::string_view text)
+            {
+            }
+            void print_2_columns(std::ostream& os, std::string_view left, std::string_view right)
+            {
+                os << "  ";
+                os << std::setw(26) << std::left << left;
+                if (left.size() > 22 && right != "")
+                {
+                    os << "\n";
+                }
+                std::stringstream desc_{std::string(right)};
+                std::size_t bytes_written = 0;
+                while (desc_)
+                {
+                    std::string word;
+                    desc_ >> word;
+                    if (bytes_written > 0 && bytes_written + word.size() > 32)
+                    {
+                        bytes_written = 0;
+                        os << "\n  " << std::setw(26) << "";
+                    }
+                    if (word == "")
+                    {
+                        break;
+                    }
+                    os << word << " ";
+                    bytes_written += word.size() + 1;
+                }
             }
         }
         class base_sub_program
@@ -102,12 +130,16 @@ namespace po
                   const base_option* parent
                 , std::string_view long_name
                 , char short_name
-                , std::string_view pattern)
+                , std::string_view pattern
+                , std::string_view desc
+                , std::string_view arg_name)
 
                 : _parent(parent)
                 , _long_name(long_name)
                 , _short_name(short_name)
                 , _pattern(pattern)
+                , _desc(desc)
+                , _arg_name(arg_name)
             {}
             virtual ParseStatus
                 try_parse_option(int* argc, const char*** argv)
@@ -118,38 +150,38 @@ namespace po
                     if (_pattern == "")
                     {
                         const char* on = **argv;
-                        if (on[0] == 0 || on[1] == 0)
+                        if (on[0] != 0)
                         {
-                            throw std::runtime_error("po error: invalid option");
-                        }
-                        if (on[0] != '-')
-                        {
-                            if (on[1] == 0 && _short_name != 0 && on[0] == _short_name)
+                            if (on[0] != '-')
+                            {
+                                if (on[1] == 0 && _short_name != 0 && on[0] == _short_name)
+                                {
+                                    result = ParseStatus::Match;
+                                }
+                                else if (_long_name != "" && std::strcmp(on, _long_name.data()) == 0)
+                                {
+                                    result = ParseStatus::Match;
+                                }
+                            }
+                            else if (on[1] != '-' && _short_name != 0 && on[1] == _short_name)
                             {
                                 result = ParseStatus::Match;
                             }
-                            else if (_long_name != "" && std::strcmp(on, _long_name.data()) == 0)
+                            else if (_long_name != "")
                             {
-                                result = ParseStatus::Match;
+                                auto iter = std::find(on + 2, on + std::strlen(on), '=');
+                                if (std::strncmp(on + 2, _long_name.data(), iter - on - 2) == 0)
+                                {
+                                    result = ParseStatus::Match;
+                                }
                             }
-                        }
-                        else if (on[1] != '-' && _short_name != 0 && on[1] == _short_name)
-                        {
-                            result = ParseStatus::Match;
-                        }
-                        else if (_long_name != "")
-                        {
-                            auto iter = std::find(on + 2, on + std::strlen(on), '=');
-                            if (std::strncmp(on + 2, _long_name.data(), iter - on - 2) == 0)
+                            if (result == ParseStatus::Match)
                             {
-                                result = ParseStatus::Match;
+                                _parsed_argument = std::string_view(**argv);
+                                (*argc)--;
+                                (*argv)++;
+                                _parsed_count++;
                             }
-                        }
-                        if (result == ParseStatus::Match)
-                        {
-                            _parsed_argument = std::string_view(**argv);
-                            (*argc)--;
-                            (*argv)++;
                         }
                     }
                     else
@@ -177,6 +209,7 @@ namespace po
                             _parsed_pattern_argument = std::string_view(begin, iter - begin);
                             (*argc)--;
                             (*argv)++;
+                            _parsed_count++;
                             result = ParseStatus::Match;
                         }
                     }
@@ -198,8 +231,57 @@ namespace po
             {
                 return _long_name == "" ? std::string_view(&_short_name) : _long_name;
             }
-            virtual bool
-                notify() const = 0;
+            template <class T>
+            std::string
+                get_print_name_argument(std::optional<T> def) const
+            {
+                std::string name_ = "";
+                if (short_name() != 0)
+                {
+                    name_ += "-";
+                    name_.push_back(short_name());
+                    if (long_name() != "")
+                    {
+                        name_ += " | --" + std::string(long_name());
+                    }
+                }
+                else
+                {
+                    name_ += "--" + std::string(long_name());
+                }
+                std::string argn(arg_name());
+                if (argn == "")
+                {
+                    argn = "arg";
+                }
+                if (def)
+                {
+                    if constexpr (std::is_same_v<T, char>)
+                    {
+                        name_ += " <" + argn + "=";
+                        name_.push_back(*def);
+                        name_ += ">";
+                    }
+                    else if constexpr (std::is_same_v<T, std::string>)
+                    {
+                        name_ += " <" + argn + "=" + *def + ">";
+                    }
+                    else
+                    {
+                        name_ += " <" + argn + "=" + std::to_string(*def) + ">";
+                    }
+                }
+                else
+                {
+                    name_ += " <" + argn + ">";
+                }
+                return name_;
+            }
+            std::string
+                get_print_name_positional() const
+            {
+                return "<" + std::string(arg_name()) + ">...";
+            }
             bool
                 parsed() const
             {
@@ -214,6 +296,11 @@ namespace po
                 parsed_argument() const
             {
                 return _parsed_argument;
+            }
+            std::size_t
+                parsed_count() const
+            {
+                return _parsed_count;
             }
             void
                 set_parsed_argument(std::string_view parsed_argument)
@@ -244,6 +331,24 @@ namespace po
                 result += std::string(name());
                 return result;
             }
+            void inc_parsed_count()
+            {
+                _parsed_count++;
+            }
+            std::string_view
+                desc() const
+            {
+                return _desc;
+            }
+            std::string_view
+                arg_name() const
+            {
+                return _arg_name;
+            }
+            virtual void
+                notify() const = 0;
+            virtual void
+                print_help(std::ostream& os, int argc, const char** argv) const = 0;
 
         private:
             const base_option* _parent;
@@ -252,6 +357,9 @@ namespace po
             std::string_view _pattern;
             std::string_view _parsed_argument;
             std::string_view _parsed_pattern_argument;
+            std::string_view _desc;
+            std::string_view _arg_name;
+            std::size_t _parsed_count{0};
         };
         class base_group
             : public base_option
@@ -259,23 +367,40 @@ namespace po
         public:
             using base1_t = base_option;
 
-            base_group(const base_option* parent, std::string_view name, char short_name, bool optional)
-                : base1_t(parent, name, short_name, "")
+            base_group(
+                  const base_option* parent
+                , std::string_view name
+                , char short_name
+                , bool optional
+                , std::string_view desc)
+
+                : base1_t(parent, name, short_name, "", desc, "")
                 , _optional(optional)
             {}
             void
                 register_option(base_option* bo)
             {
-                if (dynamic_cast<base_group*>(bo))
-                {
-                    if (_positional_argument != nullptr)
-                    {
-                        throw std::runtime_error("po error: can not add group \"" + std::string(bo->name()) +
-                            "\" to group \"" + std::string(name()) + "\" which already holds a positional argument");
-                    }
-                    _has_group = true;
-                }
                 _options.push_back(bo);
+            }
+            void
+                register_group(base_group* bg)
+            {
+                _groups.push_back(bg);
+            }
+            void 
+                set_multi_positional_argument(base_option* bo)
+            {
+                _multi_positional_argument = bo;
+            }
+            base_option*
+                get_multi_positional_argument()
+            {
+                return _multi_positional_argument;
+            }
+            const base_option*
+                get_multi_positional_argument() const
+            {
+                return _multi_positional_argument;
             }
             void
                 set_help_option(base_option* help)
@@ -296,20 +421,6 @@ namespace po
                 _sub_program = sp;
             }
             void
-                set_positional_argument(base_option* bo)
-            {
-                if (_positional_argument != nullptr)
-                {
-                    throw std::runtime_error("po error: tryed to set positional for \"" + std::string(name()) + "\" twice");
-                }
-                if (_has_group)
-                {
-                    throw std::runtime_error("po error: can not add positional argument \"" + std::string(bo->name()) +
-                        "\" to group \"" + std::string(name()) + "\" which already holds a group");
-                }
-                _positional_argument = bo;
-            }
-            void
                 set_after(base_option* bo)
             {
                 _after = bo;
@@ -325,49 +436,56 @@ namespace po
                 auto result = base1_t::try_parse_option(argc, argv);
                 if (result == ParseStatus::Match)
                 {
-                    if (!parsed_as_group())
+                    if (parsed_as_group())
                     {
-                        throw std::runtime_error("po error: ambigious argument \"" + std::string(name()) + "\"");
-                    }
-                    if (*argc == 0)
-                    {
-                        throw std::runtime_error("po error: parsing program option failed, no more arguments given");
-                    }
-                    bool parsed = true;
-                    bool group_parsed = false;
-                    bool matched = false;
-                    std::size_t parsed_counter = 0;
-                    while (parsed)
-                    {
-                        parsed = false;
-                        for (auto* op : options())
+                        bool parsed = true;
+                        bool group_parsed = false;
+                        std::size_t parsed_counter = 0;
+                        while (parsed)
                         {
-                            auto ret = op->try_parse_option(argc, argv);
-                            if (ret == ParseStatus::Match)
+                            parsed = false;
+                            for (auto* op : options())
                             {
-                                matched = true;
-                                if (!op->parsed_as_group() && *argc != 0)
+                                auto ret = op->try_parse_option(argc, argv);
+                                if (ret == ParseStatus::Match)
                                 {
-                                    parsed = true;
+                                    if (!op->parsed_as_group() && *argc != 0)
+                                    {
+                                        parsed = true;
+                                    }
+                                    parsed_counter++;
+                                    break;
                                 }
-                                parsed_counter++;
-                                break;
+                                else if (ret == ParseStatus::HelpParsed)
+                                {
+                                    parsed= false;
+                                    result = ret;
+                                    break;
+                                }
                             }
-                            else if (ret == ParseStatus::HelpParsed)
+                            for (auto* bg : groups())
                             {
-                                parsed= false;
-                                result = ret;
-                                break;
+                                auto ret = bg->try_parse_option(argc, argv);
+                                if (ret == ParseStatus::Match)
+                                {
+                                    break;
+                                }
                             }
                         }
+                        if (_bind_to != nullptr)
+                        {
+                            _bind_to->try_parse_option(argc, argv);
+                        }
+                        if (_multi_positional_argument != nullptr)
+                        {
+                            _multi_positional_argument->try_parse_option(argc, argv);
+                        }
                     }
-                    if (_bind_to != nullptr)
+                    else
                     {
-                        _bind_to->try_parse_option(argc, argv);
-                    }
-                    if (result != ParseStatus::HelpParsed && !group_parsed && parsed_counter != 0)
-                    {
-                        result = parse_positional(argc, argv);
+                        (*argc)++;
+                        (*argv)--;
+                        result = ParseStatus::NoMatch;
                     }
                 }
                 if (_after != nullptr)
@@ -391,6 +509,11 @@ namespace po
             {
                 return _options;
             }
+            const std::vector<base_group*>&
+                groups() const
+            {
+                return _groups;
+            }
             bool
                 optional() const
             {
@@ -406,7 +529,27 @@ namespace po
                 }
                 return result;
             }
-            virtual bool
+            base_option*
+                after()
+            {
+                return _after;
+            }
+            const base_option*
+                after() const
+            {
+                return _after;
+            }
+            base_option*
+                bind_to()
+            {
+                return _bind_to;
+            }
+            const base_option*
+                bind_to() const
+            {
+                return _bind_to;
+            }
+            virtual void
                 notify() const override
             {
                 bool result = false;
@@ -418,43 +561,58 @@ namespace po
                 {
                     for (const auto* op : options())
                     {
-                        result = op->notify();
-                        if (result)
-                        {
-                            break;
-                        }
+                        op->notify();
                     }
                     if (_bind_to != nullptr)
                     {
+                        if (!_bind_to->parsed())
+                        {
+                            throw std::runtime_error("po error: if \"" + std::string(name()) + "\" is given, \"" +
+                                std::string(_bind_to->name()) + "\" must follow");
+                        }
                         _bind_to->notify();
                     }
                 }
                 if (_after != nullptr)
                 {
+                    if (!_after->parsed())
+                    {
+                        throw std::runtime_error("po error: could not find \"" + std::string(_after->name()) + "\"");
+                    }
                     _after->notify();
                 }
-                return result;
             }
-
-         protected:
-            ParseStatus
-                parse_positional(int* argc, const char*** argv)
+            virtual void
+                print_help(std::ostream& os, int argc, const char** argv) const override
             {
-                ParseStatus result = ParseStatus::Match;
-                if (_positional_argument != nullptr)
+                os << "Options:\n";
+                for (const auto* op : options())
                 {
-                    result = _positional_argument->try_parse_option(argc, argv);
+                    op->print_help(os, argc, argv);
                 }
-                return result;
+                if (groups().size() > 0)
+                {
+                    os << "\nSubGroups:\n";
+                    for (const auto* g : groups())
+                    {
+                        helper::print_2_columns(os, g->name(), g->desc());
+                        os << "\n\n";
+                    }
+                }
+                if (get_multi_positional_argument() != nullptr)
+                {
+                    get_multi_positional_argument()->print_help(os, argc, argv);
+                }
             }
 
         private:
             std::vector<base_option*> _options;
+            std::vector<base_group*> _groups;
             base_option* _help;
             base_sub_program* _sub_program{nullptr};
-            base_option* _positional_argument{nullptr};
             base_option* _after{nullptr};
             base_option* _bind_to{nullptr};
+            base_option* _multi_positional_argument{nullptr};
             bool _optional;
             bool _has_group{false};
         };
@@ -462,8 +620,10 @@ namespace po
             : public base_group
         {
         public:
+            using base1_t = base_group;
+
             root_group()
-                : base_group(nullptr, "main_group", 0, "")
+                : base_group(nullptr, "main_group", 0, "", "")
             {
                 set_parsed_argument("main_group");
             }
@@ -471,52 +631,89 @@ namespace po
                 try_parse_option(int* argc, const char*** argv) override
             {
                 ParseStatus result = ParseStatus::NoMatch;
-                if (argc == 0)
+                if (*argc != 0)
                 {
-                    throw std::runtime_error("po error: parsing program option failed, no more arguments given");
-                }
-                bool parsed = true;
-                bool group_parsed = false;
-                bool matched = false;
-                std::size_t parsed_counter = 0;
-                while (parsed)
-                {
-                    parsed = false;
-                    for (auto* op : options())
+                    bool parsed = true;
+                    while (parsed)
                     {
-                        result = op->try_parse_option(argc, argv);
-                        if (result == ParseStatus::Match)
+                        parsed = false;
+                        for (auto* op : options())
                         {
-                            parsed_counter++;
-                            matched = true;
-                            if (op->parsed_as_group())
+                            result = op->try_parse_option(argc, argv);
+                            if (*argc == 0)
                             {
-                                if (group_parsed)
-                                {
-                                    throw std::runtime_error(
-                                        "po error: two groups (first: \"" + std::string(name()) + "\" second: \"" +
-                                        std::string(op->name()) +  "\") in the same stage are not possible");
-                                }
-                                group_parsed = true;
+                                break;
                             }
-                            if (*argc != 0)
+                            if (result == ParseStatus::Match)
                             {
                                 parsed = true;
+                                break;
                             }
-                            break;
+                            else if (result == ParseStatus::HelpParsed)
+                            {
+                                break;
+                            }
                         }
-                        else if (result == ParseStatus::HelpParsed)
+                        if (!parsed)
                         {
-                            parsed = false;
-                            break;
+                            for (auto* op : groups())
+                            {
+                                result = op->try_parse_option(argc, argv);
+                                if (*argc == 0)
+                                {
+                                    break;
+                                }
+                                if (result == ParseStatus::Match)
+                                {
+                                    break;
+                                }
+                                else if (result == ParseStatus::HelpParsed)
+                                {
+                                    break;
+                                }
+                            }
                         }
                     }
-                }
-                if (result != ParseStatus::HelpParsed && !group_parsed && parsed_counter != 0)
-                {
-                    result = parse_positional(argc, argv);
+                    if (get_multi_positional_argument() != nullptr)
+                    {
+                        result = get_multi_positional_argument()->try_parse_option(argc, argv);
+                    }
                 }
                 return result;
+            }
+            virtual void
+                print_help(std::ostream& os, int argc, const char** argv) const override
+            {
+                os << "Synopsis:\n";
+                os << "  ";
+                std::filesystem::path path_to_exe(*argv);
+                os << path_to_exe.filename().string() << " ";
+                if (options().size() > 0)
+                {
+                    os << "[Options...] ";
+                }
+                if (groups().size() > 0)
+                {
+                    os << "[SubGroup] ";
+                }
+                if (get_multi_positional_argument() != nullptr)
+                {
+                    os << get_multi_positional_argument()->arg_name() << "...";
+                }
+                os << "\n\n";
+                if (desc() != "")
+                {
+                    os << desc();
+                    os << "\n\n";
+                }
+                if (groups().size() > 0)
+                {
+                    os << "Help:\n";
+                    os << "Type program_name --help for a help overview\n";
+                    os << "and program_name <SubGroup> --help for help on a specifiy SubGroup";
+                    os << "\n\n";
+                }
+                base1_t::print_help(os, argc, argv);
             }
         };
         class parser
@@ -552,18 +749,30 @@ namespace po
             ParseStatus
                 parse_command_line(int argc, const char** argv)
             {
-                auto ret = _main_group->try_parse_option(&argc, &argv);
-                if (ret != ParseStatus::Match &&
-                    ret != ParseStatus::HelpParsed)
+                _argc = argc;
+                _argv = argv;
+                ParseStatus result = ParseStatus::NoMatch;
+                argc--;
+                argv++;
+                if (argc != 0)
                 {
-                    throw std::runtime_error("po error: unkown argument \"" + std::string(*argv) + "\"");
+                    result = _main_group->try_parse_option(&argc, &argv);
+                    if (result != ParseStatus::Match &&
+                        result != ParseStatus::HelpParsed)
+                    {
+                        throw std::runtime_error("po error: unkown argument \"" + std::string(*argv) + "\"");
+                    }
                 }
-                return ret;
+                return result;
             }
-            bool
+            void
                 notify() const
             {
-                return _main_group->notify();
+                _main_group->notify();
+            }
+            operator base_group&()
+            {
+                return *_main_group;
             }
             std::optional<int>
                 execute_main()
@@ -582,8 +791,18 @@ namespace po
                 }
                 return result;
             }
+            int get_argc() const
+            {
+                return _argc;
+            }
+            const char** get_argv() const
+            {
+                return _argv;
+            }
 
         private:
+            int _argc{0};
+            const char** _argv{nullptr};
             static parser _instance;
             std::unique_ptr<root_group> _main_group;
             std::vector<base_sub_program*> _sub_programs;
@@ -596,11 +815,28 @@ namespace po
             using type_t = T;
             using base1_t = detail::base_option;
 
-            base_argument(std::string_view long_name, char short_name, std::size_t min, std::size_t max, std::string_view pattern)
-                : base_argument(*detail::parser::instance().get_main_group(), long_name, short_name, min, max, pattern)
+            base_argument(
+                  std::string_view long_name
+                , char short_name
+                , std::size_t min
+                , std::size_t max
+                , std::string_view pattern
+                , std::string_view desc
+                , std::string_view arg_name)
+
+                : base_argument(*detail::parser::instance().get_main_group(), long_name, short_name, min, max, pattern, desc, arg_name)
             {}
-            base_argument(detail::base_group& bg, std::string_view long_name, char short_name, std::size_t min, std::size_t max, std::string_view pattern)
-                : detail::base_option(&bg, long_name, short_name, pattern)
+            base_argument(
+                  detail::base_group& bg
+                , std::string_view long_name
+                , char short_name
+                , std::size_t min
+                , std::size_t max
+                , std::string_view pattern
+                , std::string_view desc
+                , std::string_view arg_name)
+
+                : detail::base_option(&bg, long_name, short_name, pattern, desc, arg_name)
                 , _min(min)
                 , _max(max)
             {
@@ -617,12 +853,6 @@ namespace po
                 auto ret = base1_t::try_parse_option(argc, argv);
                 if (ret == ParseStatus::Match)
                 {
-                    _parse_counter++;
-                    if (_parse_counter > _max)
-                    {
-                        throw std::runtime_error("po error: too many \"" + std::string(name()) +
-                            "\" arguments given, max is " + std::to_string(_max));
-                    }
                     auto pa = parsed_argument();
                     auto iter = std::find(pa.begin(), pa.end(), '=');
                     std::string_view str_value;
@@ -634,14 +864,12 @@ namespace po
                     }
                     else if (pa[1] == '-' || (pa[1] != '-' && pa[2] == 0))
                     {
-                        if (*argc == 0)
+                        if (*argc != 0)
                         {
-                            throw std::runtime_error("po error: no parameter given for argument option \""
-                                + std::string(name()) +  "\"");
+                            str_value = std::string_view(**argv);
+                            (*argc)--;
+                            (*argv)++;
                         }
-                        str_value = std::string_view(**argv);
-                        (*argc)--;
-                        (*argv)++;
                     }
                     else
                     {
@@ -651,25 +879,19 @@ namespace po
                 }
                 return result;
             }
-            bool
-                parsed() const
-            {
-                return _parse_counter > 0;
-            }
-            std::size_t
-                parse_counter() const
-            {
-                return _parse_counter;
-            }
-            virtual bool
+            virtual void
                 notify() const override
             {
-                if (_min > _parse_counter)
+                if (_min > parsed_count())
                 {
                     throw std::runtime_error("po error: too less \"" + std::string(name()) +
-                        "\" arguments given, min is " + std::to_string(_min));
+                        "\" arguments given (min=" + std::to_string(_min) + ")");
                 }
-                return false;
+                else if (_max < parsed_count())
+                {
+                    throw std::runtime_error("po error: too many \"" + std::string(name()) +
+                        "\" arguments given (min=" + std::to_string(_min) + ")");
+                }
             }
 
         private:
@@ -677,9 +899,9 @@ namespace po
             std::size_t _parse_counter{0};
         };
 
-        struct TagParentGroup {};
         struct TagLongName {};
         struct TagShortName {};
+        struct TagDesc {};
         struct TagOptional {};
         struct TagMin {};
         struct TagMax {};
@@ -689,13 +911,12 @@ namespace po
         struct TagHeader {};
         struct TagMessage {};
         struct TagBindTo {};
+        struct TagArgName {};
     }
 
-    using ParentGroup = detail::helper::named_type<detail::base_group&, detail::TagParentGroup>;
-    template <class T>
-    using ParentPositional = detail::helper::named_type<detail::base_argument<T>&, detail::TagParentGroup>;
     using LongName = detail::helper::named_type<std::string_view, detail::TagLongName>;
     using ShortName = detail::helper::named_type<char, detail::TagShortName>;
+    using Desc = detail::helper::named_type<std::string_view, detail::TagDesc>;
     using Optional = detail::helper::named_type<bool, detail::TagOptional>;
     using Min = detail::helper::named_type<std::size_t, detail::TagMin>;
     using Max = detail::helper::named_type<std::size_t, detail::TagMax>;
@@ -706,6 +927,7 @@ namespace po
     using Message = detail::helper::named_type<std::string_view, detail::TagMessage>;
     using BindTo = detail::helper::named_type<detail::base_group&, detail::TagBindTo>;
     using After = detail::helper::named_type<detail::base_group&, detail::TagBindTo>;
+    using ArgName = detail::helper::named_type<std::string_view, detail::TagArgName>;
 
     class flag
         : public detail::base_option
@@ -713,44 +935,80 @@ namespace po
     public:
         using type_t = bool;
         using base1_t = detail::base_option;
-        using valid_options_t = std::tuple<ParentGroup, LongName, ShortName, Pattern>;
+        using valid_options_t = std::tuple<LongName, ShortName, Pattern, Desc>;
         
         template <class... Args>
-        flag(Args&&... args)
+        flag(detail::base_group& parent_group, Args&&... args)
             : base1_t(
-                  &detail::helper::pick_option_with_default<ParentGroup>(*detail::parser::instance().get_main_group(), args...)
+                  &parent_group
                 , detail::helper::pick_option_with_default<LongName>("", args...)
                 , detail::helper::pick_option_with_default<ShortName>(0, args...)
-                , detail::helper::pick_option_with_default<Pattern>("", args...))
+                , detail::helper::pick_option_with_default<Pattern>("", args...)
+                , detail::helper::pick_option_with_default<Desc>("", args...)
+                , "")
         {
             static_assert((detail::helper::has_type<Args, valid_options_t>::value && ...)
                 , "po error static_assert: unkown option given for flag");
             static_assert(
-                  detail::helper::has_type<LongName, std::tuple<Args...>>::value ||
-                  detail::helper::has_type<ShortName, std::tuple<Args...>>::value
+                  detail::helper::has_type_v<LongName, std::tuple<Args...>> ||
+                  detail::helper::has_type_v<ShortName, std::tuple<Args...>>
                 , "po error static_assert: flag requires ShortName or LongName option");
-            auto& bg = detail::helper::pick_option_with_default<ParentGroup>(*detail::parser::instance().get_main_group(), args...);
-            bg.register_option(this);
-        }
-        virtual ParseStatus
-            try_parse_option(int* argc, const char*** argv) override
-        {
-            auto was_parsed = parsed();
-            auto ret = base1_t::try_parse_option(argc, argv);
-            if (ret == ParseStatus::Match && was_parsed)
-            {
-                throw std::runtime_error("po error: flag \"" + std::string(name()) + "\" appeared more than once");
-            }
-            return ret;
+            parent_group.register_option(this);
         }
         operator bool() const
         {
             return parsed();
         }
-        virtual bool
+        virtual void
             notify() const override
         {
-            return false;
+            if (parsed_count() > 1)
+            {
+                throw std::runtime_error("po error: flag \"" + std::string(name()) + "\" is specified more than once");
+            }
+        }
+        virtual void
+            print_help(std::ostream& os, int argc, const char** argv) const override
+        {
+            std::string name_ = "";
+            if (short_name() != 0)
+            {
+                name_ += "-";
+                name_.push_back(short_name());
+                if (long_name() != "")
+                {
+                    name_ += " | --" + std::string(long_name());
+                }
+            }
+            else
+            {
+                name_ += "--" + std::string(long_name());
+            }
+            os << "  ";
+            os << std::setw(26) << std::left << name_;
+            if (name_.size() > 22 && desc() != "")
+            {
+                os << "\n";
+            }
+            std::stringstream desc_{std::string(desc())};
+            std::size_t bytes_written = 0;
+            while (desc_)
+            {
+                std::string word;
+                desc_ >> word;
+                if (bytes_written > 0 && bytes_written + word.size() > 32)
+                {
+                    bytes_written = 0;
+                    os << "\n  " << std::setw(26) << "";
+                }
+                if (word == "")
+                {
+                    break;
+                }
+                os << word << " ";
+                bytes_written += word.size() + 1;
+            }
+            os << "\n\n";
         }
     };
     class multi_flag
@@ -759,55 +1017,44 @@ namespace po
     public:
         using type_t = bool;
         using base1_t = detail::base_option;
-        using valid_options_t = std::tuple<ParentGroup, LongName, ShortName, Min, Max, Pattern>;
+        using valid_options_t = std::tuple<LongName, ShortName, Min, Max, Pattern, Desc>;
 
         template <class... Args>
-        multi_flag(Args&&... args)
+        multi_flag(detail::base_group& parent_group, Args&&... args)
             : base1_t(
-                  &detail::helper::pick_option_with_default<ParentGroup>(*detail::parser::instance().get_main_group(), args...)
+                  &parent_group
                 , detail::helper::pick_option_with_default<LongName>("", args...)
                 , detail::helper::pick_option_with_default<ShortName>(0, args...)
+                , ""
+                , detail::helper::pick_option_with_default<Desc>("", args...)
                 , "")
             , _min(detail::helper::pick_option_with_default<Min>(1, args...))
             , _max(detail::helper::pick_option_with_default<Max>(std::size_t(-1), args...))
         {
             static_assert((detail::helper::has_type<Args, valid_options_t>::value && ...)
                 , "po error static_assert: unkown option given for multi_flag");
-            auto& bg = detail::helper::pick_option_with_default<ParentGroup>(*detail::parser::instance().get_main_group(), args...);
-            bg.register_option(this);
+            parent_group.register_option(this);
         }
-        virtual ParseStatus
-            try_parse_option(int* argc, const char*** argv) override
-        {
-            auto ret = base1_t::try_parse_option(argc, argv);
-            if (ret == ParseStatus::Match)
-            {
-                _count++;
-                if (_count > _max)
-                {
-                    throw std::runtime_error("po error: flag \"" + std::string(name()) +
-                        "\" appeared too often (max=" + std::to_string(_max) + ")");
-                }
-            }
-            return ret;
-        }
-        operator std::size_t() const
-        {
-            return _count;
-        }
-        virtual bool
+        virtual void
             notify() const override
         {
-            if (_count < _min)
+            if (parsed_count() < _min)
             {
                 throw std::runtime_error("po error: flag \"" + std::string(name()) +
                     "\" appeared too less (min=" + std::to_string(_min) + ")");
             }
-            return false;
+            else if (parsed_count() > _max)
+            {
+                throw std::runtime_error("po error: flag \"" + std::string(name()) +
+                    "\" appeared too often (max=" + std::to_string(_max) + ")");
+            }
+        }
+        virtual void
+            print_help(std::ostream& os, int argc, const char** argv) const override
+        {
         }
 
     private:
-        std::size_t _count{0};
         std::size_t _min, _max;
     };
     template <class T>
@@ -817,12 +1064,12 @@ namespace po
     public:
         using type_t = std::vector<T>;
         using base1_t = flag;
-        using valid_options_t = std::tuple<ParentGroup, LongName, ShortName, Min, Max, Pattern>;
+        using valid_options_t = std::tuple<LongName, ShortName, Min, Max, Pattern>;
 
         template <class... Args>
-        multi_pattern_flag(Args&&... args)
+        multi_pattern_flag(detail::base_group& parent_group, Args&&... args)
             : base1_t(
-                  ParentGroup(detail::helper::pick_option_with_default<ParentGroup>(*detail::parser::instance().get_main_group(), args...))
+                  parent_group
                 , LongName(detail::helper::pick_option_with_default<LongName>("", args...))
                 , ShortName(detail::helper::pick_option_with_default<ShortName>(0, args...))
                 , Pattern(detail::helper::pick_option_with_default<Pattern>("", args...)))
@@ -840,10 +1087,6 @@ namespace po
             if (ret == ParseStatus::Match)
             {
                 auto pa = base1_t::parsed_pattern_argument();
-                if (pa == "")
-                {
-                    throw std::runtime_error("po error: pattern variable missing for \"" + std::string(base1_t::parsed_argument()) + "\"");
-                }
                 auto value = detail::helper::lexical_cast<T>(pa);
                 _arguments.push_back(value);
             }
@@ -852,6 +1095,10 @@ namespace po
         operator type_t() const
         {
             return _arguments;
+        }
+        virtual void
+            print_help(std::ostream& os) const override
+        {
         }
 
     private:
@@ -863,12 +1110,12 @@ namespace po
     {
     public:
         using base1_t = flag;
-        using valid_options_t = std::tuple<ParentGroup, Header, Message>;
+        using valid_options_t = std::tuple<Header, Message>;
 
         template <class... Args>
-        help(Args&&... args)
+        help(detail::base_group& parent_group, Args&&... args)
             : base1_t(
-                  ParentGroup(detail::helper::pick_option_with_default<ParentGroup>(*detail::parser::instance().get_main_group(), args...))
+                  parent_group
                 , LongName("help")
                 , ShortName('h'))
             , _header(detail::helper::pick_option_with_default<Header>("", args...))
@@ -905,17 +1152,19 @@ namespace po
     public:
         using type_t = T;
         using base1_t = detail::base_argument<T>;
-        using valid_options_t = std::tuple<ParentGroup, LongName, ShortName, Min, Max, Pattern, Def<T>>;
+        using valid_options_t = std::tuple<LongName, ShortName, Desc, Min, Max, Pattern, Def<T>, ArgName>;
 
         template <class... Args>
-        argument(Args&&... args)
+        argument(detail::base_group& parent_group, Args&&... args)
             : base1_t(
-                  detail::helper::pick_option_with_default<ParentGroup>(*detail::parser::instance().get_main_group(), args...)
+                  parent_group
                 , detail::helper::pick_option_with_default<LongName>("", args...)
                 , detail::helper::pick_option_with_default<ShortName>(0, args...)
                 , 1
                 , 1
-                , "")
+                , ""
+                , detail::helper::pick_option_with_default<Desc>("", args...)
+                , detail::helper::pick_option_with_default<ArgName>("", args...))
             , _def(detail::helper::pick_option_with_default<Def<T>>(std::nullopt, args...))
         {
             static_assert((detail::helper::has_type<Args, valid_options_t>::value && ...)
@@ -940,18 +1189,24 @@ namespace po
         {
             return _argument;
         }
-        virtual bool
+        virtual void
             notify() const override
         {
-            if (!_def)
+            if (!_def && parsed())
             {
-                return base1_t::notify();
+                base1_t::notify();
             }
-            return false;
+        }
+        virtual void
+            print_help(std::ostream& os, int argc, const char** argv) const override
+        {
+            std::string name_ = get_print_name_argument(_def);
+            detail::helper::print_2_columns(os, name_, desc());
+            os << "\n\n";
         }
 
     private:
-        bool _def;
+        std::optional<T> _def;
         T _argument;
     };
     template <class T>
@@ -961,17 +1216,19 @@ namespace po
     public:
         using type_t = std::optional<T>;
         using base1_t = detail::base_argument<T>;
-        using valid_options_t = std::tuple<ParentGroup, LongName, ShortName>;
+        using valid_options_t = std::tuple<LongName, ShortName, Desc, ArgName>;
 
         template <class... Args>
-        optional_argument(Args&&... args)
+        optional_argument(detail::base_group& parent_group, Args&&... args)
             : base1_t(
-                  detail::helper::pick_option_with_default<ParentGroup>(*detail::parser::instance().get_main_group(), args...)
+                  parent_group
                 , detail::helper::pick_option_with_default<LongName>("", args...)
                 , detail::helper::pick_option_with_default<ShortName>(0, args...)
                 , 0
                 , 1
-                , "")
+                , ""
+                , detail::helper::pick_option_with_default<Desc>("", args...)
+                , detail::helper::pick_option_with_default<ArgName>("", args...))
         {
             static_assert((detail::helper::has_type<Args, valid_options_t>::value && ...)
                 , "po error static_assert: unkown option given for optional_argument");
@@ -990,6 +1247,57 @@ namespace po
         {
             return _argument;
         }
+        virtual void
+            print_help(std::ostream& os, int argc, const char** argv) const override
+        {
+            std::string name_ = "[";
+            if (short_name() != 0)
+            {
+                name_ += "-";
+                name_.push_back(short_name());
+                if (long_name() != "")
+                {
+                    name_ += " | --" + std::string(long_name());
+                }
+            }
+            else
+            {
+                name_ += "--" + std::string(long_name());
+            }
+            if (arg_name() != "")
+            {
+                name_ += " <" + std::string(arg_name()) + ">]";
+            }
+            else
+            {
+                name_ += " <arg>]";
+            }
+            os << "  ";
+            os << std::setw(26) << std::left << name_;
+            if (name_.size() > 22 && desc() != "")
+            {
+                os << "\n";
+            }
+            std::stringstream desc_{std::string(desc())};
+            std::size_t bytes_written = 0;
+            while (desc_)
+            {
+                std::string word;
+                desc_ >> word;
+                if (bytes_written > 0 && bytes_written + word.size() > 32)
+                {
+                    bytes_written = 0;
+                    os << "\n  " << std::setw(26) << "";
+                }
+                if (word == "")
+                {
+                    break;
+                }
+                os << word << " ";
+                bytes_written += word.size() + 1;
+            }
+            os << "\n\n";
+        }
 
     private:
         std::optional<T> _argument;
@@ -1001,12 +1309,12 @@ namespace po
     public:
         using type_t = std::vector<T>;
         using base1_t = detail::base_argument<T>;
-        using valid_options_t = std::tuple<ParentGroup, LongName, ShortName, Min, Max>;
+        using valid_options_t = std::tuple<LongName, ShortName, Min, Max>;
 
         template <class... Args>
-        multi_argument(Args&&... args)
+        multi_argument(detail::base_group& parent_group, Args&&... args)
             : base1_t(
-                  detail::helper::pick_option_with_default<ParentGroup>(*detail::parser::instance().get_main_group(), args...)
+                  parent_group
                 , detail::helper::pick_option_with_default<LongName>("", args...)
                 , detail::helper::pick_option_with_default<ShortName>(0, args...)
                 , detail::helper::pick_option_with_default<Min>(1, args...)
@@ -1031,6 +1339,10 @@ namespace po
         {
             return _arguments;
         }
+        virtual void
+            print_help(std::ostream& os) const override
+        {
+        }
 
     private:
         std::vector<T> _arguments;
@@ -1043,12 +1355,12 @@ namespace po
     public:
         using base1_t = detail::base_argument<ValueT>;
         using type_t = std::map<KeyT, ValueT>;
-        using valid_options_t = std::tuple<ParentGroup, LongName, ShortName, Min, Max, Pattern>;
+        using valid_options_t = std::tuple<LongName, ShortName, Min, Max, Pattern>;
 
         template <class... Args>
-        multi_pattern_argument(Args&&... args)
+        multi_pattern_argument(detail::base_group& parent_group, Args&&... args)
             : base1_t(
-                  detail::helper::pick_option_with_default<ParentGroup>(*detail::parser::instance().get_main_group(), args...)
+                  parent_group
                 , detail::helper::pick_option_with_default<LongName>("", args...)
                 , detail::helper::pick_option_with_default<ShortName>(0, args...)
                 , detail::helper::pick_option_with_default<Min>(1, args...)
@@ -1066,12 +1378,8 @@ namespace po
             if (ret)
             {
                 auto pa = base1_t::parsed_pattern_argument();
-                if (pa == "")
-                {
-                    throw std::runtime_error("po error: pattern variable missing for \"" + std::string(base1_t::parsed_argument()) + "\"");
-                }
                 auto key = detail::helper::lexical_cast<KeyT>(pa);
-                _arguments.insert(std::make_pair(key, *ret));
+                _arguments[key] = *ret;
             }
             return ret ? ParseStatus::Match : ParseStatus::NoMatch;
         }
@@ -1089,32 +1397,30 @@ namespace po
     public:
         using type_t = std::string_view;
         using base1_t = detail::base_group;
-        using valid_options_t = std::tuple<ParentGroup, LongName, ShortName, After, BindTo>;
+        using valid_options_t = std::tuple<LongName, ShortName, After, BindTo, Desc>;
         
         template <class... Args>
-        positional_argument(Args&&... args)
+        positional_argument(detail::base_group& parent_group, Args&&... args)
             : base1_t(
-                  &detail::helper::pick_option_with_default<ParentGroup>(*detail::parser::instance().get_main_group(), args...)
+                  &parent_group
                 , detail::helper::pick_option_with_default<LongName>("", args...)
                 , detail::helper::pick_option_with_default<ShortName>(0, args...)
-                , false)
+                , false
+                , detail::helper::pick_option_with_default<Desc>("", args...))
         {
             static_assert((detail::helper::has_type<Args, valid_options_t>::value && ...)
                 , "po error static_assert: unkown option given for positional_argument");
-            if constexpr (detail::helper::has_type<ParentGroup, std::tuple<Args...>>::value)
+            if constexpr (detail::helper::has_type<After, std::tuple<Args...>>::value)
             {
-                auto& bg = detail::helper::pick_option_with_default<ParentGroup>(*detail::parser::instance().get_main_group(), args...);
-                bg.register_option(this);
-            }
-            else if constexpr (detail::helper::has_type<After, std::tuple<Args...>>::value)
-            {
-                auto& bg = detail::helper::pick_option_with_default<After>(*detail::parser::instance().get_main_group(), args...);
-                bg.set_after(this);
+                parent_group.set_after(this);
             }
             else if constexpr (detail::helper::has_type<BindTo, std::tuple<Args...>>::value)
             {
-                auto& bg = detail::helper::pick_option_with_default<BindTo>(*detail::parser::instance().get_main_group(), args...);
-                bg.set_bind_to(this);
+                parent_group.set_bind_to(this);
+            }
+            else
+            {
+                parent_group.register_option(this);
             }
         }
 
@@ -1122,18 +1428,21 @@ namespace po
             try_parse_option(int* argc, const char*** argv) override
         {
             ParseStatus result = ParseStatus::NoMatch;
-            if (*argc != 0)
+            if (*argc != 0 && (**argv)[0] == '-')
             {
-                if ((**argv)[0] == '-')
-                {
-                    throw std::runtime_error("po error: in positional arguments list arguments no loneger allowed (\"" +
-                        std::string(**argv) + "\"");
-                }
                 _argument = **argv;
+                set_parsed_argument(_argument);
                 (*argc)--;
                 (*argv)++;
-                base1_t::try_parse_option(argc, argv);
+                if (bind_to() != nullptr)
+                {
+                    bind_to()->try_parse_option(argc, argv);
+                }
                 result = ParseStatus::Match;
+            }
+            if (after() != nullptr)
+            {
+                after()->try_parse_option(argc, argv);
             }
             return result;
         }
@@ -1141,10 +1450,20 @@ namespace po
         {
             return _argument;
         }
-        bool virtual
+        void virtual
             notify() const override
         {
-            return false;
+            if (parsed())
+            {
+                if (bind_to() != nullptr)
+                {
+                    bind_to()->notify();
+                }
+            }
+            if (after() != nullptr)
+            {
+                after()->notify();
+            }
         }
 
     private:
@@ -1154,64 +1473,83 @@ namespace po
         : public detail::base_option
     {
     public:
-        using type_t = std::vector<std::string_view>;
+        using type_t = std::set<std::string_view>;
         using base1_t = detail::base_option;
-        using valid_options_t = std::tuple<ParentGroup, LongName, ShortName, Min, Max, After, BindTo>;
+        using valid_options_t = std::tuple<Min, Max, After, BindTo, Desc, ArgName>;
         
         template <class... Args>
-        multi_positional_argument(Args&&... args)
+        multi_positional_argument(detail::base_group& parent_group, Args&&... args)
             : base1_t(
-                  &detail::helper::pick_option_with_default<ParentGroup>(*detail::parser::instance().get_main_group(), args...)
-                , detail::helper::pick_option_with_default<LongName>("", args...)
-                , detail::helper::pick_option_with_default<ShortName>(0, args...)
-                , "")
+                  &parent_group
+                , ""
+                , 0
+                , ""
+                , detail::helper::pick_option_with_default<Desc>("", args...)
+                , detail::helper::pick_option_with_default<ArgName>("", args...))
             , _min(detail::helper::pick_option_with_default<Min>(1, args...))
             , _max(detail::helper::pick_option_with_default<Max>(std::size_t(-1), args...))
         {
             static_assert((detail::helper::has_type<Args, valid_options_t>::value && ...)
                 , "po error static_assert: unkown option given for positional_argument");
-            if constexpr (detail::helper::has_type<ParentGroup, std::tuple<Args...>>::value)
+            static_assert((detail::helper::has_type<Args, valid_options_t>::value && ...)
+                , "po error static_assert: argument ArgName required for positional_argument");
+            if constexpr (detail::helper::has_type<After, std::tuple<Args...>>::value)
             {
-                auto& bg = detail::helper::pick_option_with_default<ParentGroup>(*detail::parser::instance().get_main_group(), args...);
-                bg.register_option(this);
-            }
-            else if constexpr (detail::helper::has_type<After, std::tuple<Args...>>::value)
-            {
-                auto& bg = detail::helper::pick_option_with_default<After>(*detail::parser::instance().get_main_group(), args...);
-                bg.set_after(this);
+                parent_group.set_after(this);
             }
             else if constexpr (detail::helper::has_type<BindTo, std::tuple<Args...>>::value)
             {
-                auto& bg = detail::helper::pick_option_with_default<BindTo>(*detail::parser::instance().get_main_group(), args...);
-                bg.set_bind_to(this);
+                parent_group.set_bind_to(this);
+            }
+            else
+            {
+                parent_group.set_multi_positional_argument(this);
             }
         }
 
         virtual ParseStatus
             try_parse_option(int* argc, const char*** argv) override
         {
-            while (*argc)
+            ParseStatus result = ParseStatus::NoMatch;
+            if (*argc != 0)
             {
-                if ((**argv)[0] == '-')
+                while (*argc)
                 {
-                    throw std::runtime_error("po error: in positional arguments list arguments no loneger allowed (\"" +
-                        std::string(**argv) + "\"");
+                    std::string_view value = **argv;
+                    set_parsed_argument(value);
+                    _arguments.insert(value);
+                    inc_parsed_count();
+                    (*argc)--;
+                    (*argv)++;
                 }
-                std::string_view value = **argv;
-                _arguments.push_back(value);
-                (*argc)--;
-                (*argv)++;
+                result = ParseStatus::Match;
             }
-            return ParseStatus::Match;
+            return result;
         }
         operator type_t() const
         {
             return _arguments;
         }
-        bool virtual
+        void virtual
             notify() const override
         {
-            return false;
+            if (_min > parsed_count())
+            {
+                throw std::runtime_error("po error: too less arguments for positional arguments (min=" +
+                    std::to_string(_min) + ")");
+            }
+            else if (_max < parsed_count())
+            {
+                throw std::runtime_error("po error: too many arguments for \"" +
+                    std::string(name()) + "\" (max=" + std::to_string(_max) + ")");
+            }
+        }
+        virtual void
+            print_help(std::ostream& os, int argc, const char** argv) const override
+        {
+            std::string name_ = get_print_name_positional();
+            detail::helper::print_2_columns(os, name_, desc());
+            os << "\n\n";
         }
 
     private:
@@ -1223,32 +1561,30 @@ namespace po
     {
     public:
         using base1_t = detail::base_group;
-        using valid_options_t = std::tuple<ParentGroup, LongName, ShortName, Optional, After, BindTo>;
+        using valid_options_t = std::tuple<LongName, ShortName, Optional, After, BindTo, Desc>;
 
         template <class... Args>
-        group(Args&&... args)
+        group(detail::base_group& parent_group, Args&&... args)
             : base1_t(
-                  &detail::helper::pick_option_with_default<ParentGroup>(*detail::parser::instance().get_main_group(), args...)
+                  &parent_group
                 , detail::helper::pick_option_with_default<LongName>("", args...)
                 , detail::helper::pick_option_with_default<ShortName>(0, args...)
-                , detail::helper::pick_option_with_default<Optional>(true, args...))
+                , detail::helper::pick_option_with_default<Optional>(true, args...)
+                , detail::helper::pick_option_with_default<Desc>("", args...))
         {
             static_assert((detail::helper::has_type_v<Args, valid_options_t> && ...)
                 , "po error static_assert: unkown option given for group");
             if constexpr (detail::helper::has_type_v<After, std::tuple<Args...>>)
             {
-                auto& bg = detail::helper::pick_option_with_default<After>(*detail::parser::instance().get_main_group(), args...);
-                bg.set_after(this);
+                parent_group.set_after(this);
             }
             else if constexpr (detail::helper::has_type_v<BindTo, std::tuple<Args...>>)
             {
-                auto& bg = detail::helper::pick_option_with_default<BindTo>(*detail::parser::instance().get_main_group(), args...);
-                bg.set_bind_to(this);
+                parent_group.set_bind_to(this);
             }
             else
             {
-                auto& bg = detail::helper::pick_option_with_default<ParentGroup>(*detail::parser::instance().get_main_group(), args...);
-                bg.register_option(this);
+                parent_group.register_group(this);
             }
         }
         operator bool() const
@@ -1263,18 +1599,11 @@ namespace po
     public:
         using base1_t = detail::base_sub_program;
 
-        sub_program(std::function<int(const typename Args::type_t&...)>&& program, const Args&... args)
+        sub_program(detail::parser& p, detail::base_group& bg, std::function<int(const typename Args::type_t&...)>&& program, const Args&... args)
             : _program(program)
             , _member{std::forward_as_tuple(args...)}
         {
-            detail::parser::instance().register_sub_program(this);
-            _base_group = detail::parser::instance().get_main_group();
-        }
-        sub_program(detail::base_group& bg, std::function<int(const typename Args::type_t&...)>&& program, const Args&... args)
-            : _program(program)
-            , _member{std::forward_as_tuple(args...)}
-        {
-            detail::parser::instance().register_sub_program(this);
+            p.register_sub_program(this);
             _base_group = &bg;
         }
         virtual int
@@ -1305,10 +1634,10 @@ namespace po
             print_help_if_parsed()
         {
         }
-        static bool
+        static void
             notify()
         {
-            return detail::parser::instance().notify();
+            detail::parser::instance().notify();
         }
         static int
             execute_main()
@@ -1326,16 +1655,12 @@ namespace po
 #define PO_INIT_MAIN_FILE() \
     po::detail::parser po::detail::parser::_instance;
 
-#define PO_INIT_MAIN_FILE_WITH_SUB_PROGRAM_SUPPORT()    \
-    PO_INIT_MAIN_FILE()                                 \
-    int                                                 \
-        main(int argc, const char** argv)               \
-    {                                                   \
-        int result = 0;                                 \
-        po::command_line::parse(argc, argv);            \
-        if (!po::command_line::notify())                \
-        {                                               \
-            result = po::command_line::execute_main();  \
-        }                                               \
-        return result;                                  \
+#define PO_INIT_MAIN_FILE_WITH_SUB_PROGRAM_SUPPORT(PARSER)      \
+    PO_INIT_MAIN_FILE()                                         \
+    int                                                         \
+        main(int argc, const char** argv)                       \
+    {                                                           \
+        PARSER.parse_command_line(argc, argv);                  \
+        PARSER.notify();                                        \
+        return *PARSER.execute_main();                          \
     }
